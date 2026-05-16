@@ -6,23 +6,16 @@ plugins {
 group = 'com.palm1.analogaudio'
 version = version
 
-tasks.register('syncApi', Copy) {
-    from '../src/main/java/com/palm1/analogaudio/client/audio/api/IRadioStreamer.java'
-    into 'build/generated-api/com/palm1/analogaudio/client/audio/api'
-}
-
 sourceSets {
     main {
         java {
-            srcDirs = ['src/main/java', 'build/generated-api']
+            srcDirs = ['src/main/java']
             include 'com/palm1/analogaudio/lavaplayer/**'
             include 'com/palm1/analogaudio/integration/SoundPhysicsIntegration.java'
             include 'com/palm1/analogaudio/client/audio/api/IRadioStreamer.java'
         }
     }
 }
-
-compileJava.dependsOn syncApi
 
 repositories {
     mavenCentral()
