@@ -1,10 +1,21 @@
 plugins {
     id 'java'
     id 'com.gradleup.shadow' version '8.3.0'
+    id 'maven-publish'
 }
 
 group = 'com.palm1.analogaudio'
-version = version
+version = '1.0.0'
+
+publishing {
+    publications {
+        shadow(MavenPublication) {
+            project.shadow.component(it)
+            artifactId = 'analogplayer'
+            version = '1.0.0'
+        }
+    }
+}
 
 sourceSets {
     main {
