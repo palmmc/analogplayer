@@ -113,11 +113,14 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             AL10.alSourcei(sourceId, AL10.AL_SOURCE_RELATIVE, AL10.AL_FALSE);
 
             try {
-                double[] shiftedPos = SoundPhysicsIntegration.processSound(sourceId, interpX, interpY, interpZ,
+                double[] shiftedPos = SoundPhysicsIntegration.processSound(sourceId, x, y, z,
                         "BLOCKS", "analogaudio", "radio", false);
                 if (shiftedPos != null) {
-                    AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) shiftedPos[0], (float) shiftedPos[1],
-                            (float) shiftedPos[2]);
+                    double interpShiftedX = pX + (shiftedPos[0] - pX) * threshold;
+                    double interpShiftedY = pY + (shiftedPos[1] - pY) * threshold;
+                    double interpShiftedZ = pZ + (shiftedPos[2] - pZ) * threshold;
+                    AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) interpShiftedX, (float) interpShiftedY,
+                            (float) interpShiftedZ);
                 } else {
                     AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) interpX, (float) interpY, (float) interpZ);
                 }
@@ -229,6 +232,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
 
     @Override
     public void playTrack(String url, long offsetMs) {
+        final long requestTimeMs = System.currentTimeMillis();
         String finalUrl = url;
         if (url.startsWith("file:/")) {
             finalUrl = url.substring(6);
@@ -236,18 +240,20 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
         PLAYER_MANAGER.loadItem(finalUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                if (offsetMs > 0) {
+                long elapsedMs = System.currentTimeMillis() - requestTimeMs;
+                long adjustedOffsetMs = offsetMs + elapsedMs;
+                if (adjustedOffsetMs > 0) {
                     long duration = track.getDuration();
                     if (duration > 0) {
-                        if (!looping && offsetMs > duration) {
+                        if (!looping && adjustedOffsetMs > duration) {
                             playing = false;
                             if (trackEndCallback != null)
                                 trackEndCallback.run();
                             return;
                         }
-                        track.setPosition(offsetMs % duration);
+                        track.setPosition(adjustedOffsetMs % duration);
                     } else {
-                        track.setPosition(offsetMs);
+                        track.setPosition(adjustedOffsetMs);
                     }
                 }
                 player.playTrack(track);
@@ -257,18 +263,20 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (!playlist.getTracks().isEmpty()) {
                     AudioTrack track = playlist.getTracks().get(0);
-                    if (offsetMs > 0) {
+                    long elapsedMs = System.currentTimeMillis() - requestTimeMs;
+                    long adjustedOffsetMs = offsetMs + elapsedMs;
+                    if (adjustedOffsetMs > 0) {
                         long duration = track.getDuration();
                         if (duration > 0) {
-                            if (!looping && offsetMs > duration) {
+                            if (!looping && adjustedOffsetMs > duration) {
                                 playing = false;
                                 if (trackEndCallback != null)
                                     trackEndCallback.run();
                                 return;
                             }
-                            track.setPosition(offsetMs % duration);
+                            track.setPosition(adjustedOffsetMs % duration);
                         } else {
-                            track.setPosition(offsetMs);
+                            track.setPosition(adjustedOffsetMs);
                         }
                     }
                     player.playTrack(track);

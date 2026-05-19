@@ -52,17 +52,16 @@ shadowJar {
 jar.enabled = false
 tasks.build.dependsOn shadowJar
 
-tasks.register('deployBuild') {
+tasks.register('deployBuild', Copy) {
     dependsOn shadowJar
     group = 'deployment'
     description = 'Builds analogplayer JAR and copies to root libs directory.'
 
+    from shadowJar.archiveFile
+    into "../libs"
+    rename { "analogplayer.jar" }
+
     doLast {
-        copy {
-            from shadowJar.archiveFile
-            into "../libs"
-            rename { "analogplayer.jar" }
-        }
         println "Successfully deployed analogplayer.jar to root libs directory"
     }
 }
