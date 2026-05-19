@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.palm1.analogaudio'
-version = '1.0.1'
+version = '1.0.2'
 
 sourceSets {
     main {
@@ -13,6 +13,7 @@ sourceSets {
             include 'com/palm1/analogaudio/lavaplayer/**'
             include 'com/palm1/analogaudio/integration/SoundPhysicsIntegration.java'
             include 'com/palm1/analogaudio/client/audio/api/IRadioStreamer.java'
+            include 'com/palm1/analogaudio/client/audio/api/IPlaylistResolver.java'
         }
     }
 }
