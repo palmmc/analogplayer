@@ -26,6 +26,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 
 public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStreamer {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(LavaRadioStreamer.class);
     private static final AudioPlayerManager PLAYER_MANAGER;
     static {
         PLAYER_MANAGER = new DefaultAudioPlayerManager();
@@ -48,10 +49,16 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     private boolean spatial = true;
     private Runnable trackEndCallback;
     private java.util.function.Consumer<String> errorCallback;
+    private com.palm1.analogaudio.api.IAudioFilter audioFilter;
 
     public LavaRadioStreamer() {
         this.player = PLAYER_MANAGER.createPlayer();
         this.player.addListener(this);
+    }
+
+    @Override
+    public void setAudioFilter(com.palm1.analogaudio.api.IAudioFilter filter) {
+        this.audioFilter = filter;
     }
 
     @Override
@@ -97,8 +104,8 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                 fade = 0;
         }
 
-        float boost = spatial ? 1.2f : 1.0f;
-        AL10.alSourcef(sourceId, AL10.AL_GAIN, this.volume * fade * volumeFactor * boost);
+        float modifier = spatial ? 1.2f : 0.3f;
+        AL10.alSourcef(sourceId, AL10.AL_GAIN, this.volume * fade * volumeFactor * modifier);
 
         if (!spatial || range <= 0) {
             AL10.alSourcei(sourceId, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE);
@@ -159,30 +166,67 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             byte[] data = frame.getData();
 
             if (!spatial) {
+                short[] samples = new short[data.length / 2];
+                for (int i = 0; i < data.length; i += 2) {
+                    samples[i / 2] = (short) (((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF));
+                }
+
+                if (audioFilter != null) {
+                    float[] floatSamples = new float[samples.length];
+                    for (int i = 0; i < samples.length; i++) {
+                        floatSamples[i] = samples[i] / 32768.0f;
+                    }
+                    try {
+                        audioFilter.process(floatSamples, 2, 44100);
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                    for (int i = 0; i < samples.length; i++) {
+                        samples[i] = (short) Math.max(-32768, Math.min(32767, Math.round(floatSamples[i] * 32768.0f)));
+                    }
+                }
+
                 if (stereoBuffer == null || stereoBuffer.capacity() < data.length) {
                     stereoBuffer = ByteBuffer.allocateDirect(data.length);
                     stereoBuffer.order(ByteOrder.nativeOrder());
                 }
                 stereoBuffer.clear();
-                for (int i = 0; i < data.length; i += 2) {
-                    short sample = (short) (((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF));
+                for (short sample : samples) {
                     stereoBuffer.putShort(sample);
                 }
                 stereoBuffer.flip();
                 AL10.alBufferData(buffer, AL10.AL_FORMAT_STEREO16, stereoBuffer, 44100);
             } else {
                 int monoLength = data.length / 2;
+                short[] samples = new short[monoLength / 2];
+                for (int i = 0; i < data.length; i += 4) {
+                    short left = (short) (((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF));
+                    short right = (short) (((data[i + 2] & 0xFF) << 8) | (data[i + 3] & 0xFF));
+                    samples[i / 4] = (short) ((left + right) / 2);
+                }
+
+                if (audioFilter != null) {
+                    float[] floatSamples = new float[samples.length];
+                    for (int i = 0; i < samples.length; i++) {
+                        floatSamples[i] = samples[i] / 32768.0f;
+                    }
+                    try {
+                        audioFilter.process(floatSamples, 1, 44100);
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                    for (int i = 0; i < samples.length; i++) {
+                        samples[i] = (short) Math.max(-32768, Math.min(32767, Math.round(floatSamples[i] * 32768.0f)));
+                    }
+                }
+
                 if (monoBuffer == null || monoBuffer.capacity() < monoLength) {
                     monoBuffer = ByteBuffer.allocateDirect(monoLength);
                     monoBuffer.order(ByteOrder.nativeOrder());
                 }
                 monoBuffer.clear();
-
-                for (int i = 0; i < data.length; i += 4) {
-                    short left = (short) (((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF));
-                    short right = (short) (((data[i + 2] & 0xFF) << 8) | (data[i + 3] & 0xFF));
-                    short mono = (short) ((left + right) / 2);
-                    monoBuffer.putShort(mono);
+                for (short sample : samples) {
+                    monoBuffer.putShort(sample);
                 }
                 monoBuffer.flip();
 
@@ -232,18 +276,33 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
 
     @Override
     public void playTrack(String url, long offsetMs) {
+        playTrack(url, offsetMs, 0);
+    }
+
+    @Override
+    public void playTrack(String url, long offsetMs, long trueDuration) {
         final long requestTimeMs = System.currentTimeMillis();
         String finalUrl = url;
-        if (url.startsWith("file:/")) {
+        if (url.startsWith("file:///")) {
+            finalUrl = url.substring(8);
+        } else if (url.startsWith("file:/")) {
             finalUrl = url.substring(6);
         }
+        final String resolvedPath = finalUrl;
         PLAYER_MANAGER.loadItem(finalUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
                 long elapsedMs = System.currentTimeMillis() - requestTimeMs;
                 long adjustedOffsetMs = offsetMs + elapsedMs;
                 if (adjustedOffsetMs > 0) {
-                    long duration = track.getDuration();
+                    long internalDuration = track.getDuration();
+                    long duration = trueDuration > 0 ? trueDuration : internalDuration;
+                    if (duration == internalDuration && resolvedPath.toLowerCase().endsWith(".mp3")) {
+                        long parsed = Mp3DurationParser.getMp3XingDuration(resolvedPath);
+                        if (parsed > 0) {
+                            duration = parsed;
+                        }
+                    }
                     if (duration > 0) {
                         if (!looping && adjustedOffsetMs > duration) {
                             playing = false;
@@ -251,7 +310,13 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                                 trackEndCallback.run();
                             return;
                         }
-                        track.setPosition(adjustedOffsetMs % duration);
+                        long seekPos = adjustedOffsetMs % duration;
+                        long originalSeekPos = seekPos;
+                        if (duration != internalDuration && internalDuration > 0) {
+                            seekPos = (seekPos * internalDuration) / duration;
+                        }
+                        LOGGER.error("DEBUG playTrack - url: {} | trueDuration: {} | internalDuration: {} | duration: {} | originalSeekPos: {} | scaledSeekPos: {}", url, trueDuration, internalDuration, duration, originalSeekPos, seekPos);
+                        track.setPosition(seekPos);
                     } else {
                         track.setPosition(adjustedOffsetMs);
                     }
@@ -266,7 +331,14 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                     long elapsedMs = System.currentTimeMillis() - requestTimeMs;
                     long adjustedOffsetMs = offsetMs + elapsedMs;
                     if (adjustedOffsetMs > 0) {
-                        long duration = track.getDuration();
+                        long internalDuration = track.getDuration();
+                        long duration = trueDuration > 0 ? trueDuration : internalDuration;
+                        if (duration == internalDuration && resolvedPath.toLowerCase().endsWith(".mp3")) {
+                            long parsed = Mp3DurationParser.getMp3XingDuration(resolvedPath);
+                            if (parsed > 0) {
+                                duration = parsed;
+                            }
+                        }
                         if (duration > 0) {
                             if (!looping && adjustedOffsetMs > duration) {
                                 playing = false;
@@ -274,7 +346,13 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                                     trackEndCallback.run();
                                 return;
                             }
-                            track.setPosition(adjustedOffsetMs % duration);
+                            long seekPos = adjustedOffsetMs % duration;
+                            long originalSeekPos = seekPos;
+                            if (duration != internalDuration && internalDuration > 0) {
+                                seekPos = (seekPos * internalDuration) / duration;
+                            }
+                            LOGGER.error("DEBUG playlist playTrack - url: {} | trueDuration: {} | internalDuration: {} | duration: {} | originalSeekPos: {} | scaledSeekPos: {}", url, trueDuration, internalDuration, duration, originalSeekPos, seekPos);
+                            track.setPosition(seekPos);
                         } else {
                             track.setPosition(adjustedOffsetMs);
                         }
@@ -314,8 +392,17 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     public void fetchDuration(String url, java.util.function.Consumer<Long> callback) {
         System.out.println("Fetching duration for: " + url);
         String finalUrl = url;
-        if (url.startsWith("file:/")) {
+        if (url.startsWith("file:///")) {
+            finalUrl = url.substring(8);
+        } else if (url.startsWith("file:/")) {
             finalUrl = url.substring(6);
+        }
+        if (finalUrl.toLowerCase().endsWith(".mp3")) {
+            long parsed = Mp3DurationParser.getMp3XingDuration(finalUrl);
+            if (parsed > 0) {
+                callback.accept(parsed);
+                return;
+            }
         }
         PLAYER_MANAGER.loadItem(finalUrl, new AudioLoadResultHandler() {
             @Override

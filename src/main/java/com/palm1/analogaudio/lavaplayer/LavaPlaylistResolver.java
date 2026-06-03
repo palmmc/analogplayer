@@ -20,17 +20,33 @@ public class LavaPlaylistResolver implements IPlaylistResolver {
     static {
         PLAYER_MANAGER = new DefaultAudioPlayerManager();
         PLAYER_MANAGER.registerSourceManager(new YoutubeAudioSourceManager());
+        PLAYER_MANAGER
+                .registerSourceManager(new com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager());
         AudioSourceManagers.registerRemoteSources(PLAYER_MANAGER);
     }
 
     @Override
     public CompletableFuture<List<ResolvedTrack>> resolve(String url) {
         CompletableFuture<List<ResolvedTrack>> future = new CompletableFuture<>();
-        PLAYER_MANAGER.loadItem(url, new AudioLoadResultHandler() {
+        String finalUrl = url;
+        if (url.startsWith("file:///")) {
+            finalUrl = url.substring(8);
+        } else if (url.startsWith("file:/")) {
+            finalUrl = url.substring(6);
+        }
+        final String resolvedPath = finalUrl;
+        PLAYER_MANAGER.loadItem(finalUrl, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
                 List<ResolvedTrack> tracks = new ArrayList<>();
-                tracks.add(new ResolvedTrack(track.getInfo().uri, track.getInfo().title, track.getDuration()));
+                long duration = track.getDuration();
+                if (resolvedPath.toLowerCase().endsWith(".mp3")) {
+                    long parsed = Mp3DurationParser.getMp3XingDuration(resolvedPath);
+                    if (parsed > 0) {
+                        duration = parsed;
+                    }
+                }
+                tracks.add(new ResolvedTrack(track.getInfo().uri, track.getInfo().title, duration));
                 future.complete(tracks);
             }
 
@@ -38,7 +54,14 @@ public class LavaPlaylistResolver implements IPlaylistResolver {
             public void playlistLoaded(AudioPlaylist playlist) {
                 List<ResolvedTrack> tracks = new ArrayList<>();
                 for (AudioTrack track : playlist.getTracks()) {
-                    tracks.add(new ResolvedTrack(track.getInfo().uri, track.getInfo().title, track.getDuration()));
+                    long duration = track.getDuration();
+                    if (resolvedPath.toLowerCase().endsWith(".mp3")) {
+                        long parsed = Mp3DurationParser.getMp3XingDuration(resolvedPath);
+                        if (parsed > 0) {
+                            duration = parsed;
+                        }
+                    }
+                    tracks.add(new ResolvedTrack(track.getInfo().uri, track.getInfo().title, duration));
                 }
                 future.complete(tracks);
             }
