@@ -27,6 +27,12 @@ import java.util.Queue;
 
 public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStreamer {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(LavaRadioStreamer.class);
+    private static final java.util.concurrent.ScheduledExecutorService SEEK_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "LavaRadioStreamer-SeekExecutor");
+                t.setDaemon(true);
+                return t;
+            });
     private static final AudioPlayerManager PLAYER_MANAGER;
     static {
         PLAYER_MANAGER = new DefaultAudioPlayerManager();
@@ -294,6 +300,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             public void trackLoaded(AudioTrack track) {
                 long elapsedMs = System.currentTimeMillis() - requestTimeMs;
                 long adjustedOffsetMs = offsetMs + elapsedMs;
+                long targetSeekPos = -1;
                 if (adjustedOffsetMs > 0) {
                     long internalDuration = track.getDuration();
                     long duration = trueDuration > 0 ? trueDuration : internalDuration;
@@ -311,17 +318,27 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                             return;
                         }
                         long seekPos = adjustedOffsetMs % duration;
-                        long originalSeekPos = seekPos;
                         if (duration != internalDuration && internalDuration > 0) {
                             seekPos = (seekPos * internalDuration) / duration;
                         }
-                        LOGGER.error("DEBUG playTrack - url: {} | trueDuration: {} | internalDuration: {} | duration: {} | originalSeekPos: {} | scaledSeekPos: {}", url, trueDuration, internalDuration, duration, originalSeekPos, seekPos);
-                        track.setPosition(seekPos);
+                        targetSeekPos = seekPos;
                     } else {
-                        track.setPosition(adjustedOffsetMs);
+                        targetSeekPos = adjustedOffsetMs;
                     }
                 }
                 player.playTrack(track);
+                if (targetSeekPos > 0) {
+                    final long posToSeek = targetSeekPos;
+                    SEEK_EXECUTOR.schedule(() -> {
+                        try {
+                            if (player.getPlayingTrack() == track) {
+                                track.setPosition(posToSeek);
+                            }
+                        } catch (Throwable t) {
+                            LOGGER.error("Failed to seek track {}", url, t);
+                        }
+                    }, 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
             }
 
             @Override
@@ -330,6 +347,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                     AudioTrack track = playlist.getTracks().get(0);
                     long elapsedMs = System.currentTimeMillis() - requestTimeMs;
                     long adjustedOffsetMs = offsetMs + elapsedMs;
+                    long targetSeekPos = -1;
                     if (adjustedOffsetMs > 0) {
                         long internalDuration = track.getDuration();
                         long duration = trueDuration > 0 ? trueDuration : internalDuration;
@@ -347,17 +365,27 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                                 return;
                             }
                             long seekPos = adjustedOffsetMs % duration;
-                            long originalSeekPos = seekPos;
                             if (duration != internalDuration && internalDuration > 0) {
                                 seekPos = (seekPos * internalDuration) / duration;
                             }
-                            LOGGER.error("DEBUG playlist playTrack - url: {} | trueDuration: {} | internalDuration: {} | duration: {} | originalSeekPos: {} | scaledSeekPos: {}", url, trueDuration, internalDuration, duration, originalSeekPos, seekPos);
-                            track.setPosition(seekPos);
+                            targetSeekPos = seekPos;
                         } else {
-                            track.setPosition(adjustedOffsetMs);
+                            targetSeekPos = adjustedOffsetMs;
                         }
                     }
                     player.playTrack(track);
+                    if (targetSeekPos > 0) {
+                        final long posToSeek = targetSeekPos;
+                        SEEK_EXECUTOR.schedule(() -> {
+                            try {
+                                if (player.getPlayingTrack() == track) {
+                                    track.setPosition(posToSeek);
+                                }
+                            } catch (Throwable t) {
+                                LOGGER.error("Failed to seek track {}", url, t);
+                            }
+                        }, 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    }
                 }
             }
 
