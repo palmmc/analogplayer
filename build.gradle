@@ -9,7 +9,7 @@ version = '1.2.0'
 sourceSets {
     main {
         java {
-            srcDirs = ['src/main/java', '../common/src/main/java']
+            srcDirs = ['src/main/java']
             include 'com/palm1/analoglib/lavaplayer/**'
             include 'com/palm1/analoglib/client/audio/api/IRadioStreamer.java'
             include 'com/palm1/analoglib/client/audio/api/IPlaylistResolver.java'
