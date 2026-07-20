@@ -1,6 +1,6 @@
-package com.palm1.analogaudio.lavaplayer;
+package com.palm1.analoglib.lavaplayer;
 
-import com.palm1.analogaudio.client.audio.api.IPlaylistResolver;
+import com.palm1.analoglib.client.audio.api.IPlaylistResolver;
 import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;

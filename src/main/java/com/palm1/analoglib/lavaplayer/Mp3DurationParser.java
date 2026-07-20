@@ -1,4 +1,4 @@
-package com.palm1.analogaudio.lavaplayer;
+package com.palm1.analoglib.lavaplayer;
 
 public class Mp3DurationParser {
     public static long getMp3XingDuration(String filePath) {

@@ -3,18 +3,18 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.0'
 }
 
-group = 'com.palm1.analogaudio'
-version = '1.1.0'
+group = 'com.palm1.analoglib'
+version = '1.2.0'
 
 sourceSets {
     main {
         java {
-            srcDirs = ['src/main/java']
-            include 'com/palm1/analogaudio/lavaplayer/**'
-            include 'com/palm1/analogaudio/integration/SoundPhysicsIntegration.java'
-            include 'com/palm1/analogaudio/client/audio/api/IRadioStreamer.java'
-            include 'com/palm1/analogaudio/client/audio/api/IPlaylistResolver.java'
-            include 'com/palm1/analogaudio/api/IAudioFilter.java'
+            srcDirs = ['src/main/java', '../common/src/main/java']
+            include 'com/palm1/analoglib/lavaplayer/**'
+            include 'com/palm1/analoglib/client/audio/api/IRadioStreamer.java'
+            include 'com/palm1/analoglib/client/audio/api/IPlaylistResolver.java'
+            include 'com/palm1/analoglib/api/IAudioFilter.java'
+            include 'com/sedmelluq/discord/lavaplayer/**'
         }
     }
 }
@@ -37,9 +37,9 @@ dependencies {
 shadowJar {
     archiveClassifier.set('')
     
-    exclude "com/palm1/analogaudio/config/**"
-    exclude "com/palm1/analogaudio/integration/**"
-    exclude "com/palm1/analogaudio/client/audio/api/**"
+    exclude "com/palm1/analoglib/config/**"
+    exclude "com/palm1/analoglib/integration/**"
+    exclude "com/palm1/analoglib/client/audio/api/**"
 
     mergeServiceFiles()
     
@@ -54,59 +54,3 @@ shadowJar {
 
 jar.enabled = false
 tasks.build.dependsOn shadowJar
-
-tasks.register('deployBuild', Copy) {
-    dependsOn shadowJar
-    group = 'deployment'
-    description = 'Builds analogplayer JAR and copies to root libs directory.'
-
-    from shadowJar.archiveFile
-    into "../libs"
-    rename { "analogplayer.jar" }
-
-    doLast {
-        println "Successfully deployed analogplayer.jar to root libs directory"
-    }
-}
-
-tasks.build.dependsOn deployBuild
-
-tasks.register('deployLocal') {
-    dependsOn shadowJar
-    group = 'deployment'
-    description = 'Builds analogplayer JAR and copies to local deploy path for testing.'
-
-    def projectDirPath = projectDir.absolutePath
-    def jarProvider = shadowJar.archiveFile
-
-    doLast {
-        def envFile = new File(projectDirPath, ".env")
-        if (!envFile.exists()) {
-            throw new GradleException(".env file not found in ${projectDirPath}.")
-        }
-
-        def env = new Properties()
-        envFile.withInputStream { env.load(it) }
-        
-        def deployPath = env.getProperty('LOCAL_DEPLOY_PATH')
-        if (!deployPath) {
-            throw new GradleException("LOCAL_DEPLOY_PATH not defined in .env")
-        }
-
-        def destDir = new File(projectDirPath, deployPath)
-        if (!destDir.exists()) {
-            destDir.mkdirs()
-        }
-
-        def jarFile = jarProvider.get().asFile
-        def destFile = new File(destDir, jarFile.name)
-        
-        java.nio.file.Files.copy(
-            jarFile.toPath(), 
-            destFile.toPath(), 
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING
-        )
-        
-        println "Successfully deployed ${jarFile.name} to ${destDir.absolutePath}"
-    }
-}

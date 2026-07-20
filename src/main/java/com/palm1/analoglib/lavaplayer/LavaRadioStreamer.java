@@ -1,8 +1,8 @@
-package com.palm1.analogaudio.lavaplayer;
+package com.palm1.analoglib.lavaplayer;
 
-import com.palm1.analogaudio.client.audio.api.IRadioStreamer;
+import com.palm1.analoglib.client.audio.api.IRadioStreamer;
+import com.palm1.analoglib.api.IAudioFilter;
 
-import com.palm1.analogaudio.integration.SoundPhysicsIntegration;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
@@ -27,8 +27,8 @@ import java.util.Queue;
 
 public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStreamer {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(LavaRadioStreamer.class);
-    private static final java.util.concurrent.ScheduledExecutorService SEEK_EXECUTOR =
-            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+    private static final java.util.concurrent.ScheduledExecutorService SEEK_EXECUTOR = java.util.concurrent.Executors
+            .newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "LavaRadioStreamer-SeekExecutor");
                 t.setDaemon(true);
                 return t;
@@ -55,7 +55,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     private boolean spatial = true;
     private Runnable trackEndCallback;
     private java.util.function.Consumer<String> errorCallback;
-    private com.palm1.analogaudio.api.IAudioFilter audioFilter;
+    private IAudioFilter audioFilter;
 
     public LavaRadioStreamer() {
         this.player = PLAYER_MANAGER.createPlayer();
@@ -63,7 +63,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     }
 
     @Override
-    public void setAudioFilter(com.palm1.analogaudio.api.IAudioFilter filter) {
+    public void setAudioFilter(IAudioFilter filter) {
         this.audioFilter = filter;
     }
 
@@ -91,6 +91,12 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     @Override
     public void updatePosition(double x, double y, double z, double pX, double pY, double pZ, double vX, double vY,
             double vZ, double range, float volumeFactor) {
+        updatePosition(x, y, z, pX, pY, pZ, vX, vY, vZ, range, volumeFactor, 0.1f);
+    }
+
+    @Override
+    public void updatePosition(double x, double y, double z, double pX, double pY, double pZ, double vX, double vY,
+            double vZ, double range, float volumeFactor, float spatialityThreshold) {
         this.lastX = x;
         this.lastY = y;
         this.lastZ = z;
@@ -118,7 +124,7 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             AL10.alSource3f(sourceId, AL10.AL_POSITION, 0, 0, 0);
             AL10.alSource3f(sourceId, AL11.AL_VELOCITY, 0, 0, 0);
         } else {
-            double threshold = 0.3;
+            double threshold = spatialityThreshold;
             double interpX = pX + (x - pX) * threshold;
             double interpY = pY + (y - pY) * threshold;
             double interpZ = pZ + (z - pZ) * threshold;
@@ -126,8 +132,11 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             AL10.alSourcei(sourceId, AL10.AL_SOURCE_RELATIVE, AL10.AL_FALSE);
 
             try {
-                double[] shiftedPos = SoundPhysicsIntegration.processSound(sourceId, x, y, z,
-                        "BLOCKS", "analogaudio", "radio", false);
+                Class<?> spCls = Class.forName("com.palm1.analogaudio.integration.SoundPhysicsIntegration");
+                java.lang.reflect.Method m = spCls.getMethod("processSound", int.class, double.class, double.class,
+                        double.class, String.class, String.class, String.class, boolean.class);
+                double[] shiftedPos = (double[]) m.invoke(null, sourceId, x, y, z, "BLOCKS", "analoglib", "radio",
+                        false);
                 if (shiftedPos != null) {
                     double interpShiftedX = pX + (shiftedPos[0] - pX) * threshold;
                     double interpShiftedY = pY + (shiftedPos[1] - pY) * threshold;
@@ -138,7 +147,6 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                     AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) interpX, (float) interpY, (float) interpZ);
                 }
             } catch (Throwable t) {
-                t.printStackTrace();
                 AL10.alSource3f(sourceId, AL10.AL_POSITION, (float) interpX, (float) interpY, (float) interpZ);
             }
 
@@ -152,6 +160,9 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
     private ByteBuffer monoBuffer;
 
     private void streamAudio() {
+        if (sourceId == -1) {
+            start();
+        }
         if (sourceId == -1 || !playing)
             return;
 
@@ -167,6 +178,23 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
             AudioFrame frame = player.provide();
             if (frame == null)
                 break;
+
+            AudioTrack currentTrack = player.getPlayingTrack();
+            if (currentTrack != null && pendingSeeks.containsKey(currentTrack)) {
+                int count = frameCounts.getOrDefault(currentTrack, 0) + 1;
+                frameCounts.put(currentTrack, count);
+                if (count >= 5) {
+                    Long posToSeek = pendingSeeks.remove(currentTrack);
+                    frameCounts.remove(currentTrack);
+                    if (posToSeek != null && posToSeek > 0) {
+                        try {
+                            currentTrack.setPosition(posToSeek);
+                        } catch (Throwable t) {
+                            LOGGER.error("Failed to seek track {}", currentTrack.getIdentifier(), t);
+                        }
+                    }
+                }
+            }
 
             int buffer = buffers.poll();
             byte[] data = frame.getData();
@@ -247,6 +275,13 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
         }
     }
 
+    private final java.util.Map<AudioTrack, Long> pendingSeeks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<AudioTrack, Integer> frameCounts = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void onTrackStart(AudioPlayer player, AudioTrack track) {
+    }
+
     @Override
     public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
         if (endReason.mayStartNext) {
@@ -287,6 +322,9 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
 
     @Override
     public void playTrack(String url, long offsetMs, long trueDuration) {
+        player.stopTrack();
+        start();
+        playing = true;
         final long requestTimeMs = System.currentTimeMillis();
         String finalUrl = url;
         if (url.startsWith("file:///")) {
@@ -326,19 +364,10 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                         targetSeekPos = adjustedOffsetMs;
                     }
                 }
-                player.playTrack(track);
                 if (targetSeekPos > 0) {
-                    final long posToSeek = targetSeekPos;
-                    SEEK_EXECUTOR.schedule(() -> {
-                        try {
-                            if (player.getPlayingTrack() == track) {
-                                track.setPosition(posToSeek);
-                            }
-                        } catch (Throwable t) {
-                            LOGGER.error("Failed to seek track {}", url, t);
-                        }
-                    }, 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    pendingSeeks.put(track, targetSeekPos);
                 }
+                player.playTrack(track);
             }
 
             @Override
@@ -373,19 +402,10 @@ public class LavaRadioStreamer extends AudioEventAdapter implements IRadioStream
                             targetSeekPos = adjustedOffsetMs;
                         }
                     }
-                    player.playTrack(track);
                     if (targetSeekPos > 0) {
-                        final long posToSeek = targetSeekPos;
-                        SEEK_EXECUTOR.schedule(() -> {
-                            try {
-                                if (player.getPlayingTrack() == track) {
-                                    track.setPosition(posToSeek);
-                                }
-                            } catch (Throwable t) {
-                                LOGGER.error("Failed to seek track {}", url, t);
-                            }
-                        }, 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        pendingSeeks.put(track, targetSeekPos);
                     }
+                    player.playTrack(track);
                 }
             }
 
