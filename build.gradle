@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.palm1.analoglib'
-version = '1.2.0'
+version = project.findProperty('analogplayer_version') ?: '1.3.0'
 
 sourceSets {
     main {
@@ -13,6 +13,7 @@ sourceSets {
             include 'com/palm1/analoglib/lavaplayer/**'
             include 'com/palm1/analoglib/client/audio/api/IRadioStreamer.java'
             include 'com/palm1/analoglib/client/audio/api/IPlaylistResolver.java'
+            include 'com/palm1/analoglib/client/audio/api/StereoMode.java'
             include 'com/palm1/analoglib/api/IAudioFilter.java'
             include 'com/sedmelluq/discord/lavaplayer/**'
         }
