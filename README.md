@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Analogplayer** has been deprecated and will not be updated.
+
 # analogplayer
  Lavaplayer patch for the Analog Audio mod.
 
